@@ -144,9 +144,7 @@ builtinNames = [
     Builtin('wstring', 'char16_t *', False, False),
 ]
 
-builtinMap = {}
-for b in builtinNames:
-    builtinMap[b.name] = b
+builtinMap = {b.name: b for b in builtinNames}
 
 
 class Location(object):
@@ -173,7 +171,7 @@ class Location(object):
 
     def pointerline(self):
         def i():
-            for i in xrange(0, self._colno):
+            for _ in xrange(0, self._colno):
                 yield " "
             yield "^"
 
@@ -196,9 +194,7 @@ class NameMap(object):
         self._d = {}
 
     def __getitem__(self, key):
-        if key in builtinMap:
-            return builtinMap[key]
-        return self._d[key]
+        return builtinMap[key] if key in builtinMap else self._d[key]
 
     def __iter__(self):
         return self._d.itervalues()
@@ -217,9 +213,7 @@ class NameMap(object):
                 return
             if isinstance(old, Forward) and isinstance(object, Interface):
                 self._d[object.name] = object
-            elif isinstance(old, Interface) and isinstance(object, Forward):
-                pass
-            else:
+            elif not isinstance(old, Interface) or not isinstance(object, Forward):
                 raise IDLError("name '%s' specified twice. Previous location: %s" % (object.name, self._d[object.name].location), object.location)
         else:
             self._d[object.name] = object
@@ -308,10 +302,9 @@ class IDL(object):
                 yield p
 
     def needsJSTypes(self):
-        for p in self.productions:
-            if p.kind == 'interface' and p.needsJSTypes():
-                return True
-        return False
+        return any(
+            p.kind == 'interface' and p.needsJSTypes() for p in self.productions
+        )
 
 
 class CDATA(object):
@@ -466,7 +459,7 @@ class Native(object):
             const = True
 
         if self.specialtype == 'jsval':
-            if calltype == 'out' or calltype == 'inout':
+            if calltype in ['out', 'inout']:
                 return "JS::MutableHandleValue "
             return "JS::HandleValue "
 
@@ -475,7 +468,7 @@ class Native(object):
         elif self.isPtr(calltype):
             m = '*' + ((self.modifier == 'ptr' and calltype != 'in') and '*' or '')
         else:
-            m = calltype != 'in' and '*' or ''
+            m = '*' if calltype != 'in' else ''
         return "%s%s %s" % (const and 'const ' or '', self.nativename, m)
 
     def __str__(self):
@@ -564,8 +557,7 @@ class Interface(object):
         if self.members is None:
             l.append("\tincomplete type\n")
         else:
-            for m in self.members:
-                l.append(str(m))
+            l.extend(str(m) for m in self.members)
         return "".join(l)
 
     def getConst(self, name, location):
@@ -784,7 +776,7 @@ class Attribute(object):
                 getBuiltinOrNativeTypeName(self.realtype) != '[domstring]'):
             raise IDLError("'Undefined' attribute can only be used on DOMString",
                            self.location)
-        if self.infallible and not self.realtype.kind == 'builtin':
+        if self.infallible and self.realtype.kind != 'builtin':
             raise IDLError('[infallible] only works on builtin types '
                            '(numbers, booleans, and raw char types)',
                            self.location)
@@ -795,20 +787,18 @@ class Attribute(object):
 
     def toIDL(self):
         attribs = attlistToIDL(self.attlist)
-        readonly = self.readonly and 'readonly ' or ''
+        readonly = 'readonly ' if self.readonly else ''
         return "%s%sattribute %s %s;" % (attribs, readonly, self.type, self.name)
 
     def isScriptable(self):
-        if not self.iface.attributes.scriptable:
-            return False
-        return not self.noscript
+        return False if not self.iface.attributes.scriptable else not self.noscript
 
     def __str__(self):
         return "\t%sattribute %s %s\n" % (self.readonly and 'readonly ' or '',
                                           self.type, self.name)
 
     def count(self):
-        return self.readonly and 1 or 2
+        return 1 if self.readonly else 2
 
 
 class Method(object):
@@ -888,11 +878,7 @@ class Method(object):
         return "\t%s %s(%s)\n" % (self.type, self.name, ", ".join([p.name for p in self.params]))
 
     def toIDL(self):
-        if len(self.raises):
-            raises = ' raises (%s)' % ','.join(self.raises)
-        else:
-            raises = ''
-
+        raises = ' raises (%s)' % ','.join(self.raises) if len(self.raises) else ''
         return "%s%s %s (%s)%s;" % (attlistToIDL(self.attlist),
                                     self.type,
                                     self.name,
@@ -1312,10 +1298,11 @@ class IDLParser(object):
                   | number RSHIFT number"""
         n1 = p[1]
         n2 = p[3]
-        if p[2] == '<<':
-            p[0] = lambda i: n1(i) << n2(i)
-        else:
-            p[0] = lambda i: n1(i) >> n2(i)
+        p[0] = (
+            (lambda i: n1(i) << n2(i))
+            if p[2] == '<<'
+            else (lambda i: n1(i) >> n2(i))
+        )
 
     def p_number_bitor(self, p):
         """number : number '|' number"""
@@ -1389,18 +1376,12 @@ class IDLParser(object):
     def p_optreadonly(self, p):
         """optreadonly : READONLY
                        | """
-        if len(p) > 1:
-            p[0] = p.slice[1].doccomments
-        else:
-            p[0] = None
+        p[0] = p.slice[1].doccomments if len(p) > 1 else None
 
     def p_raises(self, p):
         """raises : RAISES '(' idlist ')'
                   | """
-        if len(p) == 1:
-            p[0] = []
-        else:
-            p[0] = p[3]
+        p[0] = [] if len(p) == 1 else p[3]
 
     def p_idlist(self, p):
         """idlist : IDENTIFIER"""
@@ -1414,9 +1395,8 @@ class IDLParser(object):
     def p_error(self, t):
         if not t:
             raise IDLError("Syntax Error at end of file. Possibly due to missing semicolon(;), braces(}) or both", None)
-        else:
-            location = Location(self.lexer, t.lineno, t.lexpos)
-            raise IDLError("invalid syntax", location)
+        location = Location(self.lexer, t.lineno, t.lexpos)
+        raise IDLError("invalid syntax", location)
 
     def __init__(self, outputdir=''):
         self._doccomments = []

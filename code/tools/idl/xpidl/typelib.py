@@ -51,7 +51,12 @@ TypeMap = {
 
 # XXXkhuey dipper types should go away (bug 677784)
 def isDipperType(type):
-    return type == xpt.Type.Tags.DOMString or type == xpt.Type.Tags.AString or type == xpt.Type.Tags.CString or type == xpt.Type.Tags.UTF8String
+    return type in [
+        xpt.Type.Tags.DOMString,
+        xpt.Type.Tags.AString,
+        xpt.Type.Tags.CString,
+        xpt.Type.Tags.UTF8String,
+    ]
 
 
 def build_interface(iface, ifaces):
@@ -68,7 +73,7 @@ def build_interface(iface, ifaces):
                 return xpt.WideStringWithSizeType(size_is, size_is)
             else:
                 tag = TypeMap[type.name]
-                isPtr = (tag == xpt.Type.Tags.char_ptr or tag == xpt.Type.Tags.wchar_t_ptr)
+                isPtr = tag in [xpt.Type.Tags.char_ptr, xpt.Type.Tags.wchar_t_ptr]
                 return xpt.SimpleType(tag,
                                       pointer=isPtr,
                                       reference=False)
@@ -80,7 +85,7 @@ def build_interface(iface, ifaces):
                                  #XXXkhuey length_is duplicates size_is (bug 677788),
                                  size_is)
 
-        if isinstance(type, xpidl.Interface) or isinstance(type, xpidl.Forward):
+        if isinstance(type, (xpidl.Interface, xpidl.Forward)):
             xptiface = None
             for i in ifaces:
                 if i.name == type.name:
@@ -95,8 +100,11 @@ def build_interface(iface, ifaces):
         if isinstance(type, xpidl.Native):
             if type.specialtype:
                 # XXXkhuey jsval is marked differently in the typelib and in the headers :-(
-                isPtr = (type.isPtr(calltype) or type.isRef(calltype)) and not type.specialtype == 'jsval'
-                isRef = type.isRef(calltype) and not type.specialtype == 'jsval'
+                isPtr = (
+                    (type.isPtr(calltype) or type.isRef(calltype))
+                ) and type.specialtype != 'jsval'
+
+                isRef = type.isRef(calltype) and type.specialtype != 'jsval'
                 return xpt.SimpleType(TypeMap[type.specialtype],
                                       pointer=isPtr,
                                       reference=isRef)
@@ -117,10 +125,7 @@ def build_interface(iface, ifaces):
         return xpt.Param(get_nsresult())
 
     def get_result_type(m):
-        if not m.notxpcom:
-            return get_nsresult()
-
-        return get_type(m.realtype, '')
+        return get_nsresult() if not m.notxpcom else get_type(m.realtype, '')
 
     def build_result_param(m):
         return xpt.Param(get_result_type(m))
@@ -140,12 +145,11 @@ def build_interface(iface, ifaces):
         type = get_type(a.realtype, getter and 'out' or 'in')
         if setter:
             return xpt.Param(type)
-        else:
-            if isDipperType(type.tag):
-                # NB: The retval bit needs to be set here, contrary to what the
-                # xpt spec says.
-                return xpt.Param(type, in_=True, retval=True, dipper=True)
-            return xpt.Param(type, in_=False, out=True, retval=True)
+        if isDipperType(type.tag):
+            # NB: The retval bit needs to be set here, contrary to what the
+            # xpt spec says.
+            return xpt.Param(type, in_=True, retval=True, dipper=True)
+        return xpt.Param(type, in_=False, out=True, retval=True)
 
     if iface.namemap is None:
         raise Exception("Interface was not resolved.")
@@ -162,10 +166,14 @@ def build_interface(iface, ifaces):
         def build_param(p):
             def findattr(p, attr):
                 if hasattr(p, attr) and getattr(p, attr):
-                    for i, param in enumerate(m.params):
-                        if param.name == getattr(p, attr):
-                            return i
-                    return None
+                    return next(
+                        (
+                            i
+                            for i, param in enumerate(m.params)
+                            if param.name == getattr(p, attr)
+                        ),
+                        None,
+                    )
 
             iid_is = findattr(p, 'iid_is')
             size_is = findattr(p, 'size_is')
@@ -243,10 +251,11 @@ def write_typelib(idl, fd, filename):
     """ Generate the typelib. """
 
     # We only care about interfaces
-    ifaces = []
-    for p in idl.productions:
-        if p.kind == 'interface':
-            ifaces.append(build_interface(p, ifaces))
+    ifaces = [
+        build_interface(p, ifaces)
+        for p in idl.productions
+        if p.kind == 'interface'
+    ]
 
     typelib = xpt.Typelib(interfaces=ifaces)
     typelib.writefd(fd)
@@ -284,12 +293,11 @@ if __name__ == '__main__':
         print >>sys.stderr, "-d requires -o"
         sys.exit(1)
 
-    if options.outfile is not None:
-        outfd = open(options.outfile, 'wb')
-        closeoutfd = True
-    else:
+    if options.outfile is None:
         raise "typelib generation requires an output file"
 
+    outfd = open(options.outfile, 'wb')
+    closeoutfd = True
     p = xpidl.IDLParser(outputdir=options.cachedir)
     idl = p.parse(open(file).read(), filename=file)
     idl.resolve(options.incdirs, p)

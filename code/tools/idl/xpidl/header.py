@@ -30,7 +30,7 @@ def firstCap(str):
 
 
 def attributeParamName(a):
-    return "a" + firstCap(a.name)
+    return f"a{firstCap(a.name)}"
 
 
 def attributeParamNames(a):
@@ -47,8 +47,8 @@ def attributeNativeName(a, getter):
 
 def attributeReturnType(a, macro):
     """macro should be NS_IMETHOD or NS_IMETHODIMP"""
-    if (a.nostdcall):
-        return macro == "NS_IMETHOD" and "virtual nsresult" or "nsresult"
+    if a.nostdcall:
+        return "virtual nsresult" if macro == "NS_IMETHOD" else "nsresult"
     else:
         return macro
 
@@ -63,12 +63,12 @@ def attributeParamlist(a, getter):
 
 
 def attributeAsNative(a, getter):
-        deprecated = a.deprecated and "NS_DEPRECATED " or ""
-        params = {'deprecated': deprecated,
-                  'returntype': attributeReturnType(a, 'NS_IMETHOD'),
-                  'binaryname': attributeNativeName(a, getter),
-                  'paramlist': attributeParamlist(a, getter)}
-        return "%(deprecated)s%(returntype)s %(binaryname)s(%(paramlist)s)" % params
+    deprecated = "NS_DEPRECATED " if a.deprecated else ""
+    params = {'deprecated': deprecated,
+              'returntype': attributeReturnType(a, 'NS_IMETHOD'),
+              'binaryname': attributeNativeName(a, getter),
+              'paramlist': attributeParamlist(a, getter)}
+    return "%(deprecated)s%(returntype)s %(binaryname)s(%(paramlist)s)" % params
 
 
 def methodNativeName(m):
@@ -111,7 +111,7 @@ def paramlistAsNative(m, empty='void'):
                                            location=None,
                                            realtype=m.realtype)))
 
-    if len(l) == 0:
+    if not l:
         return empty
 
     return ", ".join(l)
@@ -134,7 +134,7 @@ def paramlistNames(m):
     if not m.notxpcom and m.realtype.name != 'void':
         names.append('_retval')
 
-    if len(names) == 0:
+    if not names:
         return ''
     return ', '.join(names)
 
@@ -461,7 +461,7 @@ def write_interface(iface, fd):
                                      'paramList': paramlistNames(member)})
         if len(iface.members) == 0:
             fd.write('\\\n  /* no methods! */')
-        elif not member.kind in ('attribute', 'method'):
+        elif member.kind not in ('attribute', 'method'):
             fd.write('\\')
 
     emitTemplate(True,
@@ -558,8 +558,7 @@ def main():
         outfd.close()
 
     if options.depfile is not None:
-        dirname = os.path.dirname(options.depfile)
-        if dirname:
+        if dirname := os.path.dirname(options.depfile):
             try:
                 os.makedirs(dirname)
             except:

@@ -130,12 +130,11 @@ inputs = [
 
 noderoot = sys.argv[1]
 
-mtimes = []
+mtimes = [
+    os.path.getmtime(os.path.join(noderoot, inFile)) for inFile in inputs
+]
 
-for inFile in inputs:
-	mtimes = mtimes + [ os.path.getmtime(os.path.join(noderoot, inFile)) ]
-
-mtimes = mtimes + [ os.path.getmtime(sys.argv[0]) ]
+mtimes += [ os.path.getmtime(sys.argv[0]) ]
 
 mtimes.sort()
 mtimes.reverse()
